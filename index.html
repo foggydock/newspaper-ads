@@ -1,0 +1,410 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#1a1a1a">
+<link rel="manifest" href="manifest.json">
+<title>新聞広告アーカイブ</title>
+
+<style>
+  :root {
+    --bg: #f6f5f3; --card: #fff; --fg: #1c1b19; --sub: #6b6862;
+    --line: #e2dfd9; --accent: #b8422e; --chip: #efece7;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#17161a; --card:#212026; --fg:#eceaf0; --sub:#9a96a3;
+            --line:#33313a; --accent:#e0755c; --chip:#2c2b33; }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--fg);
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  header {
+    position: sticky; top: 0; z-index: 20; background: var(--bg);
+    border-bottom: 1px solid var(--line);
+    padding: calc(env(safe-area-inset-top) + 10px) 14px 10px;
+  }
+  h1 { font-size: 17px; margin: 0 0 8px; letter-spacing: .04em; }
+  .count { font-size: 12px; color: var(--sub); font-weight: 400; margin-left: 8px; }
+  input, select, textarea, button { font: inherit; color: inherit; }
+  .search {
+    width: 100%; padding: 9px 12px; border: 1px solid var(--line);
+    border-radius: 9px; background: var(--card);
+  }
+  .filters { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  select {
+    padding: 6px 9px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--card);
+  }
+  .chips { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+  .chip {
+    padding: 4px 10px; border-radius: 99px; background: var(--chip);
+    border: 1px solid transparent; font-size: 12px; cursor: pointer;
+  }
+  .chip.on { background: var(--accent); color: #fff; }
+  .axis-label { font-size: 11px; color: var(--sub); margin: 8px 0 2px; }
+  #tagpanel { display: none; max-height: 45vh; overflow-y: auto; }
+  #tagpanel.open { display: block; }
+
+  main { padding: 12px; }
+  .grid {
+    display: grid; gap: 10px;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  }
+  .card {
+    background: var(--card); border-radius: 10px; overflow: hidden;
+    border: 1px solid var(--line); cursor: pointer;
+  }
+  .card img { width: 100%; aspect-ratio: 4/3; object-fit: cover; display: block; background: var(--chip); }
+  .card .noimg {
+    width: 100%; aspect-ratio: 4/3; background: var(--chip);
+    display: grid; place-items: center; color: var(--sub); font-size: 11px;
+  }
+  .card .body { padding: 7px 9px 9px; }
+  .card .name { font-size: 13px; font-weight: 600; line-height: 1.35; }
+  .card .meta { font-size: 11px; color: var(--sub); margin-top: 3px; }
+  .card .tg { font-size: 10px; color: var(--sub); margin-top: 4px; line-height: 1.5; }
+
+  dialog {
+    border: none; border-radius: 14px; background: var(--card); color: var(--fg);
+    padding: 0; width: min(560px, 94vw); max-height: 90vh;
+  }
+  dialog::backdrop { background: rgba(0,0,0,.6); }
+  .dlg { padding: 16px; overflow-y: auto; max-height: 90vh; }
+  .dlg img { width: 100%; border-radius: 8px; margin-bottom: 12px; }
+  .row { margin-bottom: 10px; }
+  .row label { display: block; font-size: 11px; color: var(--sub); margin-bottom: 3px; }
+  .row input, .row textarea {
+    width: 100%; padding: 8px 10px; border: 1px solid var(--line);
+    border-radius: 8px; background: var(--bg);
+  }
+  .btns { display: flex; gap: 8px; justify-content: flex-end; margin-top: 14px; }
+  button {
+    padding: 8px 16px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--card); cursor: pointer;
+  }
+  button.primary { background: var(--accent); color: #fff; border-color: transparent; }
+  button.danger { color: var(--accent); }
+
+  #login { max-width: 320px; margin: 18vh auto; padding: 0 20px; }
+  #login input { width: 100%; margin-bottom: 8px; padding: 10px;
+    border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+  .msg { font-size: 12px; color: var(--accent); min-height: 18px; }
+  .hint { font-size: 12px; color: var(--sub); line-height: 1.6; }
+  #more { display: block; margin: 18px auto; }
+  [hidden] { display: none !important; }
+  .toolbar { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+  .toolbar > * { flex-shrink: 0; white-space: nowrap; }
+  .toolbar select { min-width: 0; flex-shrink: 1; }
+  .toolbar .spacer { flex: 1; }
+  progress { width: 100%; }
+</style>
+
+<div id="login" hidden>
+  <h1>新聞広告アーカイブ</h1>
+  <input id="email" type="email" placeholder="メールアドレス" autocomplete="username">
+  <input id="pw" type="password" placeholder="パスワード" autocomplete="current-password">
+  <button class="primary" id="loginBtn" style="width:100%">ログイン</button>
+  <p class="msg" id="loginMsg"></p>
+</div>
+
+<div id="app" hidden>
+  <header>
+    <h1>新聞広告アーカイブ<span class="count" id="count"></span></h1>
+    <input class="search" id="q" type="search" placeholder="広告主名で検索">
+    <div class="toolbar">
+      <select id="year"><option value="">すべての年</option></select>
+      <select id="sort">
+        <option value="date_desc">掲載日 新しい順</option>
+        <option value="date_asc">掲載日 古い順</option>
+        <option value="name">広告主名順</option>
+      </select>
+      <button id="tagbtn">タグ</button>
+      <span class="spacer"></span>
+      <button id="menu">⋯</button>
+    </div>
+    <div id="tagpanel"></div>
+  </header>
+
+  <main>
+    <div class="grid" id="grid"></div>
+    <button id="more" hidden>もっと見る</button>
+    <p class="hint" id="empty" hidden style="text-align:center;padding:40px 0">
+      該当する広告がありません
+    </p>
+  </main>
+</div>
+
+<dialog id="detail"><div class="dlg" id="detailBody"></div></dialog>
+
+<dialog id="importDlg"><div class="dlg">
+  <h3 style="margin-top:0">Notionデータの取り込み</h3>
+  <p class="hint">
+    パソコンで一度だけ実行してください。<br>
+    ① <b>ads.json</b> を選ぶ ② <b>images フォルダ</b>を選ぶ ③ 開始
+  </p>
+  <div class="row">
+    <label>① ads.json</label>
+    <input type="file" id="jsonFile" accept=".json">
+  </div>
+  <div class="row">
+    <label>② images フォルダ</label>
+    <input type="file" id="imgDir" webkitdirectory directory multiple>
+  </div>
+  <progress id="prog" value="0" max="100" hidden></progress>
+  <p class="hint" id="importMsg"></p>
+  <div class="btns">
+    <button onclick="importDlg.close()">閉じる</button>
+    <button class="primary" id="runImport">開始</button>
+  </div>
+</div></dialog>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<script>
+const SUPA_URL = "https://icxbyltorjpfexmwxzga.supabase.co";
+const SUPA_KEY = "sb_publishable_6qgfCo_xbhbjb3Lr__j-Yg_Y7Zk2yWH";
+const db = supabase.createClient(SUPA_URL, SUPA_KEY);
+
+const AXES = {
+  "形式": ["記事体","インタビュー・対談","小型広告・表札","マンガ形式・キャラ利用","編特・記事","ギミック","シリーズ広告","クイズ形式","題字活用","黒枠","年表形式","手書き","マップ","手紙","コメント","採録","号外","チラシ","名刺連合","テレビ面","小説企画"],
+  "商品メニュー": ["二連版","見開き","7段","2段多色","セクション折り","変形広告","大型複数面展開","切り替え","2総"],
+  "登場人物": ["ひと・顔","タレント","社長メッセージ","企業メッセージ","キャラクター"],
+  "目的": ["周年","賞・アワード","セミナー告知・募集告知","〇〇の日・〇〇週間","社名変更・会社設立","キャンペーン・セール","意見広告","上場","オープン告知","リクルーティング","導入事例","正月・年始","新聞広告の日","七五三","出張授業・出前授業"],
+  "テーマ": ["SDGs","ジェンダー","国際女性デー","震災","スポーツ","ウェルビーイング","子供","障害者雇用","オリパラ"],
+  "業種": ["保険通販","人材サービス","大学","BtoB","航空会社・運輸","不動産関連","学校向け","VTuber"],
+  "企画・媒体": ["Reライフ","寺子屋朝日","ボンマルシェ","Mリーグ","ビクトリーアド","マイベストプロ","Think W-Wellness","みえない交差点","EduA","Aging Gracefully","JSEC","AERA","GLOBE","DIALOG","&","朝日小学生新聞","withnews","相続会議","リーダーたちの本棚","Newton企画","メディアパートナー","朝デジ特集","BS朝日","sippo","好書好日","地球会議","記者サロン","Good Life フェア","サバイバル","おしはく"],
+  "座組": ["協賛もの","スポンサー連合","社主催","地方版ネタ","エリア広告","地方紙連携","他紙連携","ツイッター連動"],
+  "その他": ["Start"],
+};
+
+const PAGE = 60;
+let state = { q: "", year: "", tags: new Set(), sort: "date_desc", offset: 0, total: 0 };
+let urlCache = new Map();
+
+const $ = s => document.querySelector(s);
+const esc = s => (s ?? "").replace(/[&<>"]/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+
+/* ---------- 認証 ---------- */
+async function boot() {
+  const { data } = await db.auth.getSession();
+  if (data.session) start(); else $("#login").hidden = false;
+}
+$("#loginBtn").onclick = async () => {
+  $("#loginMsg").textContent = "";
+  const { error } = await db.auth.signInWithPassword({
+    email: $("#email").value.trim(), password: $("#pw").value,
+  });
+  if (error) { $("#loginMsg").textContent = "ログインできませんでした: " + error.message; return; }
+  $("#login").hidden = true; start();
+};
+$("#pw").addEventListener("keydown", e => { if (e.key === "Enter") $("#loginBtn").click(); });
+
+function start() {
+  $("#app").hidden = false;
+  buildTagPanel();
+  buildYears();
+  reload();
+}
+
+/* ---------- フィルタUI ---------- */
+function buildTagPanel() {
+  const p = $("#tagpanel");
+  p.innerHTML = Object.entries(AXES).map(([ax, tags]) => `
+    <div class="axis-label">${esc(ax)}</div>
+    <div class="chips">${tags.map(t =>
+      `<span class="chip" data-tag="${esc(t)}">${esc(t)}</span>`).join("")}</div>
+  `).join("");
+  p.onclick = e => {
+    const c = e.target.closest(".chip"); if (!c) return;
+    const t = c.dataset.tag;
+    if (state.tags.has(t)) { state.tags.delete(t); c.classList.remove("on"); }
+    else { state.tags.add(t); c.classList.add("on"); }
+    reload();
+  };
+}
+function buildYears() {
+  const sel = $("#year");
+  for (let y = 2026; y >= 2009; y--) sel.insertAdjacentHTML("beforeend", `<option>${y}</option>`);
+}
+$("#tagbtn").onclick = () => $("#tagpanel").classList.toggle("open");
+$("#year").onchange = e => { state.year = e.target.value; reload(); };
+$("#sort").onchange = e => { state.sort = e.target.value; reload(); };
+let qt;
+$("#q").oninput = e => { clearTimeout(qt); qt = setTimeout(() => { state.q = e.target.value.trim(); reload(); }, 250); };
+
+/* ---------- 一覧の読み込み ---------- */
+function query() {
+  let q = db.from("nads_ads").select("*", { count: "exact" });
+  if (state.q) q = q.ilike("advertiser", `%${state.q}%`);
+  if (state.year) q = q.gte("published_on", `${state.year}-01-01`).lte("published_on", `${state.year}-12-31`);
+  if (state.tags.size) q = q.contains("tags", [...state.tags]);
+  if (state.sort === "name") q = q.order("advertiser");
+  else q = q.order("published_on", { ascending: state.sort === "date_asc", nullsFirst: false });
+  return q;
+}
+
+async function reload() { state.offset = 0; $("#grid").innerHTML = ""; await loadPage(); }
+
+async function loadPage() {
+  const { data, count, error } = await query().range(state.offset, state.offset + PAGE - 1);
+  if (error) { alert("読み込みに失敗しました: " + error.message); return; }
+  state.total = count ?? 0;
+  $("#count").textContent = `${state.total}件`;
+  $("#empty").hidden = state.total > 0;
+  await withUrls(data);
+  $("#grid").insertAdjacentHTML("beforeend", data.map(cardHtml).join(""));
+  state.offset += data.length;
+  $("#more").hidden = state.offset >= state.total;
+}
+$("#more").onclick = loadPage;
+
+/* 非公開バケットなので、表示するぶんだけ署名付きURLをまとめて発行する */
+async function withUrls(rows) {
+  const need = rows.filter(r => r.image_path && !urlCache.has(r.image_path))
+                   .map(r => r.image_path);
+  if (need.length) {
+    const { data } = await db.storage.from("nads-photos").createSignedUrls(need, 3600);
+    (data || []).forEach(d => { if (d.signedUrl) urlCache.set(d.path, d.signedUrl); });
+  }
+  rows.forEach(r => { r._url = urlCache.get(r.image_path); ROWS.set(r.id, r); });
+}
+const ROWS = new Map();
+
+function cardHtml(r) {
+  const d = r.published_on ? r.published_on.replace(/-/g, ".") : "日付なし";
+  return `<div class="card" data-id="${r.id}">
+    ${r._url ? `<img loading="lazy" src="${r._url}" alt="">`
+             : `<div class="noimg">写真なし</div>`}
+    <div class="body">
+      <div class="name">${esc(r.advertiser)}</div>
+      <div class="meta">${d}${r.page ? ` ／ ${esc(r.page)}面` : ""}</div>
+      <div class="tg">${(r.tags || []).map(esc).join(" · ")}</div>
+    </div>
+  </div>`;
+}
+
+/* ---------- 詳細・編集 ---------- */
+$("#grid").onclick = e => {
+  const c = e.target.closest(".card"); if (!c) return;
+  openDetail(ROWS.get(c.dataset.id));
+};
+
+function openDetail(r) {
+  const allTags = Object.values(AXES).flat();
+  $("#detailBody").innerHTML = `
+    ${r._url ? `<img src="${r._url}" alt="">` : ""}
+    <div class="row"><label>広告主</label><input id="f_adv" value="${esc(r.advertiser)}"></div>
+    <div class="row"><label>掲載日</label><input id="f_date" type="date" value="${r.published_on || ""}"></div>
+    <div class="row"><label>掲載面</label><input id="f_page" value="${esc(r.page)}"></div>
+    <div class="row"><label>メモ</label><textarea id="f_note" rows="2">${esc(r.note)}</textarea></div>
+    <div class="row"><label>タグ</label>
+      <div class="chips" id="f_tags">${allTags.map(t =>
+        `<span class="chip ${(r.tags||[]).includes(t) ? "on" : ""}" data-tag="${esc(t)}">${esc(t)}</span>`
+      ).join("")}</div>
+    </div>
+    <div class="btns">
+      <button class="danger" id="f_del">削除</button>
+      <button onclick="detail.close()">閉じる</button>
+      <button class="primary" id="f_save">保存</button>
+    </div>`;
+  $("#f_tags").onclick = e => {
+    const c = e.target.closest(".chip"); if (c) c.classList.toggle("on");
+  };
+  $("#f_save").onclick = async () => {
+    const tags = [...$("#f_tags").querySelectorAll(".chip.on")].map(c => c.dataset.tag);
+    const { error } = await db.from("nads_ads").update({
+      advertiser: $("#f_adv").value.trim(),
+      published_on: $("#f_date").value || null,
+      page: $("#f_page").value.trim(),
+      note: $("#f_note").value,
+      tags, updated_at: new Date().toISOString(),
+    }).eq("id", r.id);
+    if (error) { alert("保存に失敗しました: " + error.message); return; }
+    detail.close(); reload();
+  };
+  $("#f_del").onclick = async () => {
+    if (!confirm(`「${r.advertiser}」を削除します。よろしいですか？`)) return;
+    await db.from("nads_ads").delete().eq("id", r.id);
+    if (r.image_path) await db.storage.from("nads-photos").remove([r.image_path]);
+    detail.close(); reload();
+  };
+  detail.showModal();
+}
+
+/* ---------- メニュー ---------- */
+$("#menu").onclick = () => {
+  const a = prompt("1: Notionデータの取り込み\n2: ログアウト\n番号を入力してください");
+  if (a === "1") importDlg.showModal();
+  if (a === "2") db.auth.signOut().then(() => location.reload());
+};
+
+/* ---------- 初回取り込み ---------- */
+$("#runImport").onclick = async () => {
+  const jf = $("#jsonFile").files[0];
+  const imgs = [...$("#imgDir").files].filter(f => f.name.endsWith(".jpg"));
+  if (!jf) { $("#importMsg").textContent = "ads.json を選んでください"; return; }
+  const records = JSON.parse(await jf.text());
+  const byName = new Map(imgs.map(f => [f.name, f]));
+  const { data: { user } } = await db.auth.getUser();
+
+  // すでに上がっている写真は送り直さない
+  $("#importMsg").textContent = "アップロード済みの写真を確認しています…";
+  const already = new Set();
+  for (let off = 0; ; off += 1000) {
+    const { data } = await db.storage.from("nads-photos")
+      .list(user.id, { limit: 1000, offset: off });
+    if (!data || !data.length) break;
+    data.forEach(o => already.add(o.name));
+    if (data.length < 1000) break;
+  }
+
+  $("#prog").hidden = false; $("#prog").max = records.length;
+  $("#runImport").disabled = true;
+  let done = 0, uploaded = 0, reused = 0;
+  const imgErrors = [], rowErrors = [];
+
+  for (const r of records) {
+    let path = "";
+    const file = r.image && byName.get(r.image);
+    if (file) {
+      path = `${user.id}/${r.image}`;
+      if (already.has(r.image)) {
+        reused++;
+      } else {
+        const { error } = await db.storage.from("nads-photos")
+          .upload(path, file, { upsert: true, contentType: "image/jpeg" });
+        if (error) { imgErrors.push(`${r.advertiser}: ${error.message}`); path = ""; }
+        else uploaded++;
+      }
+    }
+    const { error } = await db.from("nads_ads").upsert({
+      user_id: user.id, advertiser: r.advertiser, published_on: r.published_on,
+      page: r.page || "", tags: r.tags || [], image_path: path, notion_id: r.id,
+    }, { onConflict: "user_id,notion_id" });
+    if (error) {
+      rowErrors.push(`${r.advertiser}: ${error.message}`);
+      // 最初の1件で止める。全件同じ理由で失敗するのを黙って続けても意味がない
+      if (rowErrors.length === 1) {
+        $("#importMsg").innerHTML =
+          `<b style="color:var(--accent)">取り込みを中断しました。</b><br>` +
+          `${done}件目でデータの登録に失敗しています。<br>理由: ${esc(error.message)}`;
+        $("#runImport").disabled = false;
+        return;
+      }
+    }
+    $("#prog").value = ++done;
+    $("#importMsg").textContent =
+      `${done}/${records.length} 件（写真 新規${uploaded}枚・既存${reused}枚）`;
+  }
+
+  const ok = done - rowErrors.length;
+  $("#importMsg").innerHTML =
+    `完了：${ok}件を登録しました（写真 新規${uploaded}枚・既存${reused}枚）。` +
+    (imgErrors.length ? `<br><b style="color:var(--accent)">写真の失敗 ${imgErrors.length}件</b>: ${esc(imgErrors[0])}` : "");
+  $("#runImport").disabled = false;
+  reload();
+};
+
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+boot();
+</script>
