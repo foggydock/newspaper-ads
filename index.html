@@ -508,11 +508,55 @@ async function logCorrection(userId, adId, path, ai, final) {
 
 /* ---------- メニュー ---------- */
 $("#menu").onclick = async () => {
-  const a = prompt("1: AIの直し記録を見る\n2: Notionデータの取り込み\n3: ログアウト\n番号を入力してください");
-  if (a === "1") showCorrections();
-  if (a === "2") importDlg.showModal();
-  if (a === "3") db.auth.signOut().then(() => location.reload());
+  const a = prompt("1: データを書き出す（バックアップ）\n2: AIの直し記録を見る\n3: Notionデータの取り込み\n4: ログアウト\n番号を入力してください");
+  if (a === "1") backup();
+  if (a === "2") showCorrections();
+  if (a === "3") importDlg.showModal();
+  if (a === "4") db.auth.signOut().then(() => location.reload());
 };
+
+/* ---------- バックアップ ---------- */
+function download(name, text, type) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = document.createElement("a");
+  a.href = url; a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+const csvCell = v => {
+  const s = (v ?? "").toString();
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+};
+
+async function backup() {
+  const all = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await db.from("nads_ads")
+      .select("advertiser,published_on,page,tags,note,image_path,notion_id,created_at")
+      .order("published_on", { ascending: true, nullsFirst: true })
+      .range(from, from + 999);
+    if (error) { alert("書き出しに失敗しました: " + error.message); return; }
+    all.push(...data);
+    if (data.length < 1000) break;
+  }
+  if (!all.length) { alert("書き出すデータがありません。"); return; }
+
+  const today = new Date().toISOString().slice(0, 10);
+  download(`新聞広告アーカイブ_${today}.json`,
+    JSON.stringify(all, null, 1), "application/json");
+
+  const cols = ["advertiser", "published_on", "page", "tags", "note", "image_path"];
+  const head = ["広告主", "掲載日", "掲載面", "タグ", "メモ", "写真ファイル"];
+  const csv = [head.join(",")].concat(all.map(r =>
+    cols.map(c => csvCell(Array.isArray(r[c]) ? r[c].join(" / ") : r[c])).join(",")
+  )).join("\n");
+  // Excelで文字化けしないようBOMを付ける
+  download(`新聞広告アーカイブ_${today}.csv`, "﻿" + csv, "text/csv");
+
+  alert(`${all.length}件を2つのファイルに書き出しました。\n` +
+        `・JSON … 元に戻すとき用\n・CSV … Excelで見るとき用\n\n` +
+        `※写真そのものは含まれません（Supabaseに保管されたままです）`);
+}
 
 async function showCorrections() {
   const { data, error } = await db.from("nads_corrections")
