@@ -1,0 +1,11 @@
+{
+  "name": "新聞広告アーカイブ",
+  "short_name": "広告アーカイブ",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#f6f5f3",
+  "theme_color": "#1a1a1a",
+  "icons": [
+    { "src": "icon.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
