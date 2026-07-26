@@ -92,6 +92,18 @@
   .msg { font-size: 12px; color: var(--accent); min-height: 18px; }
   .hint { font-size: 12px; color: var(--sub); line-height: 1.6; }
   #more { display: block; margin: 18px auto; }
+  #fab {
+    position: fixed; right: 18px; z-index: 30;
+    bottom: calc(18px + env(safe-area-inset-bottom));
+    width: 56px; height: 56px; border-radius: 50%; border: none;
+    background: var(--accent); color: #fff; font-size: 28px; line-height: 1;
+    box-shadow: 0 4px 14px rgba(0,0,0,.3); padding: 0;
+  }
+  #shot { width: 100%; border-radius: 8px; margin-bottom: 12px; }
+  .ai { font-size: 12px; color: var(--sub); line-height: 1.6; margin: 4px 0 12px; }
+  .ai b { color: var(--accent); }
+  .spin { display: inline-block; animation: sp 1s linear infinite; }
+  @keyframes sp { to { transform: rotate(360deg); } }
   [hidden] { display: none !important; }
   .toolbar { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
   .toolbar > * { flex-shrink: 0; white-space: nowrap; }
@@ -133,9 +145,13 @@
       該当する広告がありません
     </p>
   </main>
+  <button id="fab" title="新聞を撮って登録">＋</button>
+  <!-- capture属性は付けない。iPhoneで「写真を撮る／ライブラリから選ぶ」を選べるようにするため -->
+  <input type="file" id="camera" accept="image/*" hidden>
 </div>
 
 <dialog id="detail"><div class="dlg" id="detailBody"></div></dialog>
+<dialog id="addDlg"><div class="dlg" id="addBody"></div></dialog>
 
 <dialog id="importDlg"><div class="dlg">
   <h3 style="margin-top:0">Notionデータの取り込み</h3>
@@ -330,6 +346,134 @@ function openDetail(r) {
   };
   detail.showModal();
 }
+
+/* ---------- 撮って登録 ---------- */
+const MAX_SIDE = 1600;
+
+/* 過去の874件と同じ長辺1600pxに揃えてから送る */
+function shrink(file) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      const s = Math.min(1, MAX_SIDE / Math.max(img.width, img.height));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.width * s); c.height = Math.round(img.height * s);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      c.toBlob(b => b ? resolve(b) : reject(new Error("画像を変換できませんでした")),
+               "image/jpeg", 0.82);
+      URL.revokeObjectURL(img.src);
+    };
+    img.onerror = () => reject(new Error("画像を読み込めませんでした"));
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+const toBase64 = blob => new Promise(res => {
+  const r = new FileReader();
+  r.onload = () => res(r.result.split(",")[1]);
+  r.readAsDataURL(blob);
+});
+
+$("#fab").onclick = () => { $("#camera").value = ""; $("#camera").click(); };
+
+$("#camera").onchange = async e => {
+  const file = e.target.files[0]; if (!file) return;
+  let blob;
+  try { blob = await shrink(file); }
+  catch (err) { alert(err.message); return; }
+
+  const allTags = Object.values(AXES).flat();
+  const url = URL.createObjectURL(blob);
+  $("#addBody").innerHTML = `
+    <img id="shot" src="${url}" alt="">
+    <p class="ai" id="aiMsg"><span class="spin">◐</span> AIが読み取っています…</p>
+    <div class="row"><label>広告主</label><input id="a_adv"></div>
+    <div class="row"><label>掲載日</label><input id="a_date" type="date"></div>
+    <div class="row"><label>掲載面</label><input id="a_page"></div>
+    <div class="row"><label>メモ</label><textarea id="a_note" rows="2"></textarea></div>
+    <div class="row"><label>タグ</label>
+      <div class="chips" id="a_tags">${allTags.map(t =>
+        `<span class="chip" data-tag="${esc(t)}">${esc(t)}</span>`).join("")}</div>
+    </div>
+    <div class="btns">
+      <button onclick="addDlg.close()">やめる</button>
+      <button class="primary" id="a_save" disabled>保存</button>
+    </div>`;
+  $("#a_tags").onclick = ev => {
+    const c = ev.target.closest(".chip"); if (c) c.classList.toggle("on");
+  };
+  addDlg.showModal();
+
+  // 読み取りを待たずに手入力できるよう、保存ボタンは先に使えるようにしておく
+  const enable = () => { $("#a_save").disabled = false; };
+  setTimeout(enable, 1500);
+
+  try {
+    const { data: { session } } = await db.auth.getSession();
+    const res = await fetch(`${SUPA_URL}/functions/v1/nads-analyze`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        apikey: SUPA_KEY,
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ image: await toBase64(blob), mime: "image/jpeg" }),
+    });
+    const out = await res.json();
+    if (!res.ok || out.error) throw new Error(out.error || `エラー ${res.status}`);
+
+    $("#a_adv").value = out.advertiser || "";
+    $("#a_date").value = out.published_on || "";
+    $("#a_page").value = out.page || "";
+    $("#a_note").value = out.note || "";
+    (out.tags || []).forEach(t => {
+      const c = $(`#a_tags .chip[data-tag="${CSS.escape(t)}"]`);
+      if (c) c.classList.add("on");
+    });
+
+    const warn = [];
+    if (!out.published_on) warn.push("掲載日は紙面に写っていないため空欄です");
+    if ((out.uncertain || []).length) warn.push("自信がない項目: " + out.uncertain.join("、"));
+    if ((out.dropped || []).length) warn.push("一覧にないタグを外しました: " + out.dropped.join("、"));
+    $("#aiMsg").innerHTML = `AIの読み取り結果です。<b>必ず確認してから保存してください。</b>` +
+      (warn.length ? `<br>${warn.map(esc).join("<br>")}` : "");
+  } catch (err) {
+    $("#aiMsg").innerHTML =
+      `<b>AIの読み取りに失敗しました。</b>手で入力すれば保存できます。<br>${esc(err.message)}`;
+  }
+  enable();
+
+  $("#a_save").onclick = async () => {
+    const adv = $("#a_adv").value.trim();
+    if (!adv) { alert("広告主を入力してください。"); return; }
+    $("#a_save").disabled = true; $("#a_save").textContent = "保存中…";
+    try {
+      const { data: { user } } = await db.auth.getUser();
+      const path = `${user.id}/new-${Date.now()}.jpg`;
+      const up = await db.storage.from("nads-photos")
+        .upload(path, blob, { contentType: "image/jpeg" });
+      if (up.error) throw new Error("写真の保存に失敗: " + up.error.message);
+
+      const { error } = await db.from("nads_ads").insert({
+        user_id: user.id, advertiser: adv,
+        published_on: $("#a_date").value || null,
+        page: $("#a_page").value.trim(),
+        note: $("#a_note").value,
+        tags: [...$("#a_tags").querySelectorAll(".chip.on")].map(c => c.dataset.tag),
+        image_path: path,
+      });
+      if (error) {
+        await db.storage.from("nads-photos").remove([path]);  // 写真だけ残さない
+        throw new Error("記録の保存に失敗: " + error.message);
+      }
+      URL.revokeObjectURL(url);
+      addDlg.close(); reload();
+    } catch (err) {
+      alert(err.message);
+      $("#a_save").disabled = false; $("#a_save").textContent = "保存";
+    }
+  };
+};
 
 /* ---------- メニュー ---------- */
 $("#menu").onclick = () => {
