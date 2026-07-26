@@ -408,6 +408,8 @@ $("#camera").onchange = async e => {
   const enable = () => { $("#a_save").disabled = false; };
   setTimeout(enable, 1500);
 
+  let proposal = null;  // AIの提案。保存時に「どこを直したか」を出すために取っておく
+
   try {
     const { data: { session } } = await db.auth.getSession();
     const res = await fetch(`${SUPA_URL}/functions/v1/nads-analyze`, {
@@ -421,6 +423,7 @@ $("#camera").onchange = async e => {
     });
     const out = await res.json();
     if (!res.ok || out.error) throw new Error(out.error || `エラー ${res.status}`);
+    proposal = out;
 
     $("#a_adv").value = out.advertiser || "";
     $("#a_date").value = out.published_on || "";
@@ -454,18 +457,21 @@ $("#camera").onchange = async e => {
         .upload(path, blob, { contentType: "image/jpeg" });
       if (up.error) throw new Error("写真の保存に失敗: " + up.error.message);
 
-      const { error } = await db.from("nads_ads").insert({
-        user_id: user.id, advertiser: adv,
+      const final = {
+        advertiser: adv,
         published_on: $("#a_date").value || null,
         page: $("#a_page").value.trim(),
         note: $("#a_note").value,
         tags: [...$("#a_tags").querySelectorAll(".chip.on")].map(c => c.dataset.tag),
-        image_path: path,
-      });
+      };
+      const { data: saved, error } = await db.from("nads_ads")
+        .insert({ user_id: user.id, image_path: path, ...final })
+        .select("id").single();
       if (error) {
         await db.storage.from("nads-photos").remove([path]);  // 写真だけ残さない
         throw new Error("記録の保存に失敗: " + error.message);
       }
+      await logCorrection(user.id, saved?.id, path, proposal, final);
       URL.revokeObjectURL(url);
       addDlg.close(); reload();
     } catch (err) {
@@ -475,12 +481,69 @@ $("#camera").onchange = async e => {
   };
 };
 
+/* AIの提案と、実際に保存した内容の食い違いを記録しておく。
+   溜まったものを後で指示文に反映して、同じ間違いを減らすため。 */
+async function logCorrection(userId, adId, path, ai, final) {
+  if (!ai) return;  // AIが動かなかったときは比べる相手がいない
+
+  const norm = s => (s ?? "").toString().trim();
+  const changed = [];
+  for (const f of ["advertiser", "published_on", "page", "note"]) {
+    if (norm(ai[f]) !== norm(final[f])) changed.push(f);
+  }
+  const aiTags = new Set(ai.tags || []);
+  const finalTags = new Set(final.tags || []);
+  const added = [...finalTags].filter(t => !aiTags.has(t));
+  const removed = [...aiTags].filter(t => !finalTags.has(t));
+  if (added.length || removed.length) changed.push("tags");
+
+  if (!changed.length) return;  // 直しがなければ記録しない
+
+  const { error } = await db.from("nads_corrections").insert({
+    user_id: userId, ad_id: adId, image_path: path,
+    ai, final, changed, tags_added: added, tags_removed: removed,
+  });
+  if (error) console.warn("修正の記録に失敗しました:", error.message);
+}
+
 /* ---------- メニュー ---------- */
-$("#menu").onclick = () => {
-  const a = prompt("1: Notionデータの取り込み\n2: ログアウト\n番号を入力してください");
-  if (a === "1") importDlg.showModal();
-  if (a === "2") db.auth.signOut().then(() => location.reload());
+$("#menu").onclick = async () => {
+  const a = prompt("1: AIの直し記録を見る\n2: Notionデータの取り込み\n3: ログアウト\n番号を入力してください");
+  if (a === "1") showCorrections();
+  if (a === "2") importDlg.showModal();
+  if (a === "3") db.auth.signOut().then(() => location.reload());
 };
+
+async function showCorrections() {
+  const { data, error } = await db.from("nads_corrections")
+    .select("*").order("created_at", { ascending: false }).limit(50);
+  if (error) { alert("読み込みに失敗しました: " + error.message); return; }
+
+  const rows = (data || []).map(c => {
+    const bits = [];
+    for (const f of ["advertiser", "published_on", "page"]) {
+      if (c.changed.includes(f)) {
+        const label = { advertiser: "広告主", published_on: "掲載日", page: "掲載面" }[f];
+        bits.push(`${label}: <s>${esc(c.ai[f] || "空欄")}</s> → <b>${esc(c.final[f] || "空欄")}</b>`);
+      }
+    }
+    if (c.tags_removed.length) bits.push(`外したタグ: <s>${c.tags_removed.map(esc).join("、")}</s>`);
+    if (c.tags_added.length) bits.push(`足したタグ: <b>${c.tags_added.map(esc).join("、")}</b>`);
+    return `<div style="border-bottom:1px solid var(--line);padding:8px 0;font-size:12px;line-height:1.7">
+      <div class="hint">${c.created_at.slice(0, 10)}${c.reviewed ? " ・反映済み" : ""}</div>
+      ${bits.join("<br>")}</div>`;
+  }).join("");
+
+  const yet = (data || []).filter(c => !c.reviewed).length;
+  $("#detailBody").innerHTML = `
+    <h3 style="margin-top:0">AIの直し記録</h3>
+    <p class="hint">AIの提案を岡野さんが直したところだけを記録しています。<br>
+    溜まったものを指示文に反映すると、同じ間違いが減ります。<br>
+    <b>未反映 ${yet}件</b></p>
+    ${rows || '<p class="hint">まだ記録はありません。「＋」から登録すると溜まっていきます。</p>'}
+    <div class="btns"><button onclick="detail.close()">閉じる</button></div>`;
+  detail.showModal();
+}
 
 /* ---------- 初回取り込み ---------- */
 $("#runImport").onclick = async () => {
