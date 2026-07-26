@@ -1,5 +1,5 @@
 // 画面のガワだけキャッシュする。写真とデータは常にネットから取る。
-const CACHE = "nads-v4";
+const CACHE = "nads-v5";
 const SHELL = ["./index.html", "./manifest.json"];
 self.addEventListener("install", e => {
   e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting()));
